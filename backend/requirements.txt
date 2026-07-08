@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+yfinance
+pandas
+pydantic
+python-dotenv
+structlog
+httpx
+backtesting
+sqlalchemy[asyncio]
+asyncpg
+redis
+celery
+google-generativeai
+ruff
+pytest
+pytest-asyncio
