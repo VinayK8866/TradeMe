@@ -9,9 +9,10 @@ httpx
 backtesting
 sqlalchemy[asyncio]
 asyncpg
-redis
+redis[asyncio]
 celery
 google-generativeai
+python-telegram-bot
 ruff
 pytest
 pytest-asyncio
