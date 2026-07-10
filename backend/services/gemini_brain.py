@@ -29,7 +29,7 @@ has_gemini = False
 
 if api_key and api_key != "your_gemini_api_key_here" and len(api_key.strip()) > 0:
     try:
-        genai.configure(api_key=api_key)
+        genai.configure(api_key=api_key, transport='rest')
         # Check if the key works by querying models, or just use it
         has_gemini = True
         logger.info("gemini_brain_configured", status="active")
@@ -43,8 +43,8 @@ def get_gemini_model() -> Optional[genai.GenerativeModel]:
     """Retrieve the Gemini model instance if configured."""
     if not has_gemini:
         return None
-    # Using gemini-1.5-flash as it is fast, cheap, and very capable
-    return genai.GenerativeModel('gemini-1.5-flash')
+    # Using gemini-3.5-flash as it is fast, cheap, and very capable
+    return genai.GenerativeModel('gemini-3.5-flash')
 
 
 # ─── Pre-Trade Scorer & Analysis ─────────────────────────────────────────────

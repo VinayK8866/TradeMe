@@ -163,7 +163,20 @@ async def open_paper_position(
         return None
 
     quantity = position_inr / current_price
-    stop_loss_price = current_price * (1 - float(settings.per_position_stop_loss_percent) / 100)
+    
+    # Dynamic ATR-based stop-loss capped at settings max stop-loss percent
+    atr = float(signal_data.get("indicators", {}).get("atr", 0))
+    max_loss_pct = float(settings.per_position_stop_loss_percent) / 100
+    max_stop_loss_price = current_price * (1 - max_loss_pct)
+
+    if atr > 0:
+        # Volatility-based: Entry Price - 1.5 * ATR
+        atr_stop_loss_price = current_price - (1.5 * atr)
+        # Cap the loss at the max stop-loss percent (choose the higher stop price)
+        stop_loss_price = max(max_stop_loss_price, atr_stop_loss_price)
+    else:
+        stop_loss_price = max_stop_loss_price
+
     now = datetime.now(timezone.utc)
 
     async with async_session() as session:

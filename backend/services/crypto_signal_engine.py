@@ -154,7 +154,7 @@ def detect_market_condition(latest: pd.Series, df: pd.DataFrame) -> dict:
     bb_squeeze = False
     if len(bb_width_series) >= 20 and not np.isnan(bb_width):
         squeeze_threshold = bb_width_series.quantile(0.25)
-        bb_squeeze = bb_width <= squeeze_threshold
+        bb_squeeze = bool(bb_width <= squeeze_threshold)
 
     # Determine primary condition
     if bb_squeeze:
@@ -564,26 +564,74 @@ async def calculate_all_signals() -> list[dict]:
     Used by Celery and the dashboard overview endpoint.
     """
     import asyncio
+    import os
+    import redis.asyncio as aioredis
+    import json
+
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    
+    # Check if we have cached signals first to return instantly
+    cache_key = "crypto:signals:all"
+    try:
+        redis = aioredis.from_url(redis_url, decode_responses=True)
+        async with redis:
+            cached = await redis.get(cache_key)
+            if cached:
+                logger.info("all_signals_cache_hit")
+                return json.loads(cached)
+    except Exception as cache_err:
+        logger.warning("failed_to_get_signals_cache", error=str(cache_err))
+
     coins = await get_tracked_coins()
     results = []
     errors = []
 
-    for coin in coins:
+    try:
+        redis = aioredis.from_url(redis_url, decode_responses=True)
+        async with redis:
+            for coin in coins:
+                try:
+                    # Check if OHLCV data is already cached
+                    ohlcv_key = f"crypto:ohlcv:{coin.coingecko_id}:365d"
+                    is_cached = await redis.exists(ohlcv_key)
+                    
+                    signal = await calculate_crypto_signal(coin.symbol)
+                    results.append(signal)
+                    logger.info(
+                        "signal_calculated",
+                        symbol=coin.symbol,
+                        signal=signal["signal"],
+                        confidence=signal["confidence"],
+                        strategy=signal["selected_strategy"],
+                        cached=is_cached
+                    )
+                    
+                    # Only sleep if the data wasn't already in Redis cache
+                    if not is_cached:
+                        await asyncio.sleep(2.0)
+                except Exception as e:
+                    errors.append({"symbol": coin.symbol, "error": str(e)})
+                    logger.error("signal_calculation_failed", symbol=coin.symbol, error=str(e))
+    except Exception as e:
+        logger.error("redis_connection_failed_in_signals", error=str(e))
+        # Fallback without Redis exists check
+        for coin in coins:
+            try:
+                signal = await calculate_crypto_signal(coin.symbol)
+                results.append(signal)
+                await asyncio.sleep(2.0)
+            except Exception as ex:
+                errors.append({"symbol": coin.symbol, "error": str(ex)})
+
+    # Cache the successful signals list in Redis for 60 seconds
+    if results and not errors:
         try:
-            signal = await calculate_crypto_signal(coin.symbol)
-            results.append(signal)
-            logger.info(
-                "signal_calculated",
-                symbol=coin.symbol,
-                signal=signal["signal"],
-                confidence=signal["confidence"],
-                strategy=signal["selected_strategy"],
-            )
-        except Exception as e:
-            errors.append({"symbol": coin.symbol, "error": str(e)})
-            logger.error("signal_calculation_failed", symbol=coin.symbol, error=str(e))
-        # 2s delay between coins — CoinGecko free tier allows ~30 req/min
-        await asyncio.sleep(2.0)
+            redis = aioredis.from_url(redis_url, decode_responses=True)
+            async with redis:
+                await redis.setex(cache_key, 60, json.dumps(results))
+                logger.info("all_signals_cached")
+        except Exception as cache_err:
+            logger.warning("failed_to_cache_signals", error=str(cache_err))
 
     logger.info("all_signals_calculated", success=len(results), errors=len(errors))
     return results

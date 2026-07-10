@@ -9,8 +9,8 @@ import structlog
 logger = structlog.get_logger()
 
 # Configure Gemini
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-flash')
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"), transport='rest')
+model = genai.GenerativeModel('gemini-3.5-flash')
 
 async def fetch_india_vix() -> Dict:
     """

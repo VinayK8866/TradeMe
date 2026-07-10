@@ -12,6 +12,7 @@ import pandas as pd
 import numpy as np
 import structlog
 import pytz
+import asyncio
 
 from sqlalchemy import select
 from db.database import async_session
@@ -89,6 +90,23 @@ async def get_daily_timing_advisory() -> str:
     Combine quantitative volatility stats with Gemini analysis
     to produce the daily timing advisory.
     """
+    import os
+    import redis.asyncio as aioredis
+    
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    cache_key = "crypto:timing_advisory"
+
+    # Check cache first
+    try:
+        redis = aioredis.from_url(redis_url, decode_responses=True)
+        async with redis:
+            cached = await redis.get(cache_key)
+            if cached:
+                logger.info("timing_advisory_cache_hit")
+                return cached
+    except Exception as cache_err:
+        logger.warning("failed_to_get_timing_advisory_cache", error=str(cache_err))
+
     try:
         # 1. Fetch tracked coin list
         async with async_session() as session:
@@ -140,8 +158,45 @@ async def get_daily_timing_advisory() -> str:
         """
 
         response = await asyncio.to_thread(model.generate_content, prompt)
-        return response.text if response else "Unable to generate daily timing advisory."
+        advisory_text = response.text if response else "Unable to generate daily timing advisory."
+        
+        # Cache successful response in Redis for 1 hour
+        if response:
+            try:
+                redis = aioredis.from_url(redis_url, decode_responses=True)
+                async with redis:
+                    await redis.setex(cache_key, 3600, advisory_text)
+                    logger.info("timing_advisory_cached")
+            except Exception as cache_err:
+                logger.warning("failed_to_cache_timing_advisory", error=str(cache_err))
+
+        return advisory_text
 
     except Exception as e:
         logger.error("daily_timing_advisory_failed", error=str(e))
-        return f"Error compiling timing advisory: {str(e)}"
+        
+        fallback = "### 🕒 Daily Timing Advisory (Technical Volatility)\n\n"
+        # Safely fetch stats in case it failed before stats was defined
+        try:
+            stats_data = await get_hourly_volatility_stats()
+        except:
+            stats_data = {"success": False}
+
+        if stats_data.get("success"):
+            fallback += "Based on the last 30 days of technical data, here are the peak volatility hours (IST):\n"
+            for peak in stats_data["volatility_peaks"]:
+                fallback += f"- **{peak['hour_ist']} IST** (Average volatility: {peak['avg_volatility_pct']}%)\n"
+            fallback += f"\n*Note: Setup or check Gemini API key quota limits. Status: {str(e)[:80]}*"
+        else:
+            fallback += "Insufficient data to calculate timing peaks. Let the bot run for a few cycles to accumulate historical data."
+
+        # Cache fallback in Redis for 5 minutes to avoid spamming a rate-limited or broken API
+        try:
+            redis = aioredis.from_url(redis_url, decode_responses=True)
+            async with redis:
+                await redis.setex(cache_key, 300, fallback)
+                logger.info("timing_advisory_error_fallback_cached")
+        except Exception as cache_err:
+            pass
+
+        return fallback

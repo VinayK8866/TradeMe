@@ -14,7 +14,7 @@ logger = structlog.get_logger()
 # Configure Gemini
 api_key = os.getenv("GOOGLE_API_KEY", "")
 if api_key:
-    genai.configure(api_key=api_key)
+    genai.configure(api_key=api_key, transport='rest')
 
 async def explain_signal(signal: ETFSignal) -> str:
     """
@@ -57,7 +57,7 @@ async def explain_signal(signal: ETFSignal) -> str:
 
     try:
         # Initialize model
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-3.5-flash')
         
         # Generate content
         response = await model.generate_content_async(prompt)
