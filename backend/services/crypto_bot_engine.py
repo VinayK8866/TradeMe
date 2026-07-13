@@ -73,27 +73,70 @@ async def run_bot_cycle(mode: str = "paper") -> dict:
 
     logger.info("bot_cycle_starting", mode=mode)
 
-    # ── Step 1: Check position-level stop-losses ─────────────────────────────────
-    triggered_positions = await check_position_stop_losses(mode)
-    for pos in triggered_positions:
-        try:
-            close_result = await close_paper_position(
-                coin_id=pos["coin_id"],
-                symbol=pos["symbol"],
-                coingecko_id=pos["coingecko_id"],
-                mode=mode,
-                reason="STOP_LOSS",
-            )
-            if close_result:
-                summary["positions_closed"].append({
-                    **close_result,
-                    "trigger": "STOP_LOSS",
-                })
-        except Exception as e:
-            summary["errors"].append(f"Stop-loss close failed for {pos['symbol']}: {e}")
-            logger.error("stop_loss_close_failed", symbol=pos["symbol"], error=str(e))
+    # ── Step 1: Scan signals first (enables exit checks & new buy filters in one run) ──
+    try:
+        all_signals = await calculate_all_signals()
+        signals_by_sym = {s["symbol"]: s for s in all_signals}
+    except Exception as e:
+        summary["errors"].append(f"Signal scan failed: {e}")
+        logger.error("signal_scan_failed", error=str(e))
+        return summary
 
-    # ── Step 2: Portfolio-level stop-loss check ──────────────────────────────────
+    # ── Step 2: Check position-level exits (Stop Loss, Take Profit, and Sell Signals) ──
+    open_positions = await get_open_positions(mode)
+    for pos in open_positions:
+        sig = signals_by_sym.get(pos.symbol)
+        current_price = 0.0
+        tech_signal = "HOLD"
+
+        if sig:
+            current_price = float(sig["indicators"].get("close", 0))
+            tech_signal = sig.get("signal", "HOLD")
+        else:
+            # Fallback if signal for held coin is missing from current scans
+            from services.crypto_data import get_current_prices
+            coin = await get_coin_by_symbol(pos.symbol)
+            if coin:
+                prices = await get_current_prices([coin.coingecko_id])
+                current_price = float(prices.get(coin.coingecko_id, 0))
+
+        if current_price <= 0:
+            continue
+
+        stop_loss = float(pos.stop_loss_price_inr or 0)
+        take_profit = float(pos.take_profit_price_inr or 0)
+
+        # Check conditions
+        exit_reason = None
+        if stop_loss > 0 and current_price <= stop_loss:
+            exit_reason = "STOP_LOSS"
+        elif take_profit > 0 and current_price >= take_profit:
+            exit_reason = "PROFIT_TARGET"
+        elif tech_signal == "SELL":
+            exit_reason = "SIGNAL_REVERSAL"
+
+        if exit_reason:
+            try:
+                coin = await get_coin_by_symbol(pos.symbol)
+                if coin:
+                    close_result = await close_paper_position(
+                        coin_id=coin.id,
+                        symbol=pos.symbol,
+                        coingecko_id=coin.coingecko_id,
+                        mode=mode,
+                        reason=exit_reason,
+                    )
+                    if close_result:
+                        summary["positions_closed"].append({
+                           **close_result,
+                           "trigger": exit_reason,
+                        })
+                        logger.info("position_exited", symbol=pos.symbol, reason=exit_reason, exit_price=current_price)
+            except Exception as e:
+                summary["errors"].append(f"Exit close failed for {pos.symbol} on {exit_reason}: {e}")
+                logger.error("exit_close_failed", symbol=pos.symbol, reason=exit_reason, error=str(e))
+
+    # ── Step 3: Portfolio-level stop-loss check ──────────────────────────────────
     incident = await check_portfolio_stop_loss(mode)
     if incident:
         summary["portfolio_stop_triggered"] = True
@@ -102,11 +145,6 @@ async def run_bot_cycle(mode: str = "paper") -> dict:
 
         # Close ALL remaining open positions
         open_positions = await get_open_positions(mode)
-        from services.crypto_data import get_current_prices
-        from services.coin_ranker import get_tracked_coins
-
-        # Get coingecko IDs for open positions
-        from sqlalchemy import select
         from db.database import async_session
         from models.crypto_models import CryptoCoin
 
@@ -128,7 +166,7 @@ async def run_bot_cycle(mode: str = "paper") -> dict:
 
         return summary  # Bot is now stopped — end cycle here
 
-    # ── Step 3: Look for new BUY opportunities ───────────────────────────────────
+    # ── Step 4: Look for new BUY opportunities ───────────────────────────────────
     open_count = len(await get_open_positions(mode))
     settings = await get_bot_settings()  # Reload after potential changes
     max_positions = settings.max_simultaneous_positions
@@ -136,14 +174,6 @@ async def run_bot_cycle(mode: str = "paper") -> dict:
     if open_count >= max_positions:
         logger.info("bot_cycle_max_positions_held", open=open_count, max=max_positions)
         summary["skipped_new_trades"] = f"Max positions ({max_positions}) already held"
-        return summary
-
-    # Calculate signals for all coins
-    try:
-        all_signals = await calculate_all_signals()
-    except Exception as e:
-        summary["errors"].append(f"Signal scan failed: {e}")
-        logger.error("signal_scan_failed", error=str(e))
         return summary
 
     # Filter to strong BUY signals only (≥60% confidence)

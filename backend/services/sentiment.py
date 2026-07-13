@@ -81,8 +81,12 @@ async def analyze_news_sentiment(symbol: str, news_text: str) -> Dict:
     """
 
     try:
-        # Run Gemini in a thread to avoid blocking the event loop
-        response = await asyncio.to_thread(model.generate_content, prompt)
+        from services.gemini_brain import get_gemini_model, generate_content_with_fallback
+        active_model = get_gemini_model()
+        if not active_model:
+            return {"score": 0.0, "label": "NEUTRAL", "summary": "Gemini key not configured. Using technical signals only."}
+            
+        response = await generate_content_with_fallback(active_model, prompt)
         text = response.text if response else ""
         
         # Parse score and summary with fallbacks

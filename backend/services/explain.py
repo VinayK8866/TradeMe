@@ -56,13 +56,13 @@ async def explain_signal(signal: ETFSignal) -> str:
     """
 
     try:
-        # Initialize model
-        model = genai.GenerativeModel('gemini-3.5-flash')
-        
-        # Generate content
-        response = await model.generate_content_async(prompt)
-        
-        return response.text.strip()
+        from services.gemini_brain import get_gemini_model, generate_content_with_fallback
+        active_model = get_gemini_model()
+        if not active_model:
+            return f"Technical Signal: {signal.signal_type}. Gemini key not configured for explanatory content."
+            
+        response = await generate_content_with_fallback(active_model, prompt)
+        return response.text.strip() if response else f"Technical Signal: {signal.signal_type}."
     except Exception as e:
         logger.error("failed_to_get_ai_explanation", error=str(e))
         return f"Sorry, I couldn't generate a deep analysis right now. Technical Signal: {signal.signal_type}."

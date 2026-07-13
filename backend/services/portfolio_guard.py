@@ -150,6 +150,7 @@ async def calculate_portfolio_value(mode: str = "paper") -> dict:
             "pnl_inr": round(pnl, 2),
             "pnl_pct": round(pnl_pct, 2),
             "stop_loss_price_inr": float(portfolio.stop_loss_price_inr or avg_buy * 0.95),
+            "take_profit_price_inr": float(portfolio.take_profit_price_inr) if portfolio.take_profit_price_inr else None,
             "strategy_used": portfolio.strategy_used,
             "opened_at": portfolio.opened_at.isoformat() if portfolio.opened_at else None,
         })

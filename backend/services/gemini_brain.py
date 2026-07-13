@@ -43,8 +43,56 @@ def get_gemini_model() -> Optional[genai.GenerativeModel]:
     """Retrieve the Gemini model instance if configured."""
     if not has_gemini:
         return None
-    # Using gemini-3.5-flash as it is fast, cheap, and very capable
+    # Default to gemini-3.5-flash
     return genai.GenerativeModel('gemini-3.5-flash')
+
+
+async def generate_content_with_fallback(model_instance: genai.GenerativeModel, prompt: str, generation_config: dict = None) -> Optional[object]:
+    """
+    Attempts to generate content using the primary model. If it fails due to
+    quota limits, model deprecations, or server issues, it falls back to
+    alternative models (gemini-3.1-flash, gemini-2.5-flash, gemini-3.5-pro, etc.).
+    """
+    if not model_instance:
+        return None
+
+    # Cascade of fallback models to try if the main one fails
+    fallback_models = [
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-3.1-flash",
+        "gemini-2.5-flash",
+        "gemini-3.1-pro"
+    ]
+    
+    # Remove duplicates but keep primary model's name at the front
+    primary_name = model_instance.model_name.split("/")[-1]
+    models_to_try = [primary_name] + [m for m in fallback_models if m != primary_name]
+
+    last_error = None
+    for model_name in models_to_try:
+        try:
+            logger.info("generating_content_attempt", model=model_name)
+            current_model = genai.GenerativeModel(model_name)
+            
+            kwargs = {}
+            if generation_config:
+                kwargs["generation_config"] = generation_config
+                
+            # Perform call
+            response = await asyncio.to_thread(current_model.generate_content, prompt, **kwargs)
+            if response and response.text:
+                logger.info("generating_content_success", model=model_name)
+                return response
+        except Exception as e:
+            logger.warning("generating_content_failed", model=model_name, error=str(e))
+            last_error = e
+            # Wait briefly before trying fallback
+            await asyncio.sleep(0.5)
+
+    if last_error:
+        raise last_error
+    return None
 
 
 # ─── Pre-Trade Scorer & Analysis ─────────────────────────────────────────────
@@ -134,9 +182,9 @@ async def analyze_pre_trade(
     """
 
     try:
-        response = await asyncio.to_thread(
-            model.generate_content,
-            prompt,
+        response = await generate_content_with_fallback(
+            model_instance=model,
+            prompt=prompt,
             generation_config={"response_mime_type": "application/json"}
         )
         text = response.text.strip() if response else ""
@@ -240,9 +288,9 @@ async def analyze_trade_outcome(trade_id: int) -> bool:
     """
 
     try:
-        response = await asyncio.to_thread(
-            model.generate_content,
-            prompt,
+        response = await generate_content_with_fallback(
+            model_instance=model,
+            prompt=prompt,
             generation_config={"response_mime_type": "application/json"}
         )
         text = response.text.strip() if response else ""
@@ -265,6 +313,28 @@ async def analyze_trade_outcome(trade_id: int) -> bool:
         return True
     except Exception as e:
         logger.error("gemini_post_trade_analysis_failed", trade_id=trade_id, error=str(e))
+        
+        fallback_msg = f"AI analysis failed to compile: {str(e)[:120]}"
+        if "quota" in str(e).lower() or "429" in str(e).lower():
+            fallback_msg = "AI analysis failed: Gemini API key exceeded its daily request limits (429 Quota Exceeded). Please wait for the daily quota to reset or upgrade your billing."
+            
+        try:
+            async with async_session() as session:
+                await session.execute(
+                    update(TradeMemory)
+                    .where(TradeMemory.trade_id == trade_id)
+                    .values(
+                        what_worked="Unavailable due to API error.",
+                        what_failed=fallback_msg,
+                        lesson="Make sure your Gemini API key has sufficient quota limits configured.",
+                        avoid_pattern="N/A"
+                    )
+                )
+                await session.commit()
+                logger.info("post_trade_analysis_fallback_written", trade_id=trade_id)
+        except Exception as db_err:
+            logger.error("failed_to_write_analysis_fallback_to_db", error=str(db_err))
+            
         return False
 
 

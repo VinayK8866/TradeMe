@@ -416,6 +416,7 @@ export default function CryptoDashboard() {
                           <th className="py-3">Avg Buy</th>
                           <th className="py-3">Live Price</th>
                           <th className="py-3 text-right">Stop Loss</th>
+                          <th className="py-3 text-right">Target Price</th>
                           <th className="py-3 text-right">P&L</th>
                         </tr>
                       </thead>
@@ -436,6 +437,9 @@ export default function CryptoDashboard() {
                               <td className="py-4 font-mono text-zinc-300">₹{p.avg_buy_price_inr.toLocaleString('en-IN')}</td>
                               <td className="py-4 font-mono text-zinc-300">₹{p.current_price_inr.toLocaleString('en-IN')}</td>
                               <td className="py-4 font-mono text-red-400 text-right">₹{p.stop_loss_price_inr.toLocaleString('en-IN')}</td>
+                              <td className="py-4 font-mono text-emerald-400 text-right">
+                                {p.take_profit_price_inr ? `₹${p.take_profit_price_inr.toLocaleString('en-IN')}` : 'None'}
+                              </td>
                               <td className={`py-4 font-mono font-bold text-right ${pnlPositive ? 'text-emerald-400' : 'text-red-400'}`}>
                                 {pnlPositive ? '+' : ''}{p.pnl_pct}%
                                 <span className="block text-[10px] font-medium text-zinc-500">₹{p.pnl_inr.toFixed(2)}</span>
@@ -545,7 +549,7 @@ export default function CryptoDashboard() {
                     </thead>
                     <tbody className="divide-y divide-white/5">
                       {stats?.best_trade && (
-                        <tr className="hover:bg-white/[0.01] transition-all bg-emerald-500/[0.01]">
+                        <tr className={`hover:bg-white/[0.01] transition-all ${stats.best_trade.pnl_pct > 0 ? 'bg-emerald-500/[0.02]' : stats.best_trade.pnl_pct < 0 ? 'bg-red-500/[0.02]' : 'bg-white/[0.01]'}`}>
                           <td className="py-4">
                             <div className="flex items-center gap-1.5">
                               <span className="font-bold text-white">{stats.best_trade.symbol}</span>
@@ -556,7 +560,9 @@ export default function CryptoDashboard() {
                           <td className="py-4 text-zinc-400">
                             {stats.best_trade.opened_at ? Math.round((new Date(stats.best_trade.closed_at).getTime() - new Date(stats.best_trade.opened_at).getTime()) / 60000) : 'N/A'} mins
                           </td>
-                          <td className="py-4 font-mono font-bold text-emerald-400">+{stats.best_trade.pnl_pct}% (+₹{stats.best_trade.pnl_inr})</td>
+                          <td className={`py-4 font-mono font-bold ${stats.best_trade.pnl_pct > 0 ? 'text-emerald-400' : stats.best_trade.pnl_pct < 0 ? 'text-red-400' : 'text-zinc-400'}`}>
+                            {stats.best_trade.pnl_pct > 0 ? '+' : ''}{stats.best_trade.pnl_pct.toFixed(2)}% ({stats.best_trade.pnl_inr > 0 ? '+₹' : stats.best_trade.pnl_inr < 0 ? '-₹' : '₹'}{Math.abs(stats.best_trade.pnl_inr).toFixed(2)})
+                          </td>
                           <td className="py-4 text-zinc-400 text-xs font-mono uppercase">{stats.best_trade.close_reason || 'Signal Reversal'}</td>
                           <td className="py-4 text-right">
                             <button 
@@ -569,7 +575,7 @@ export default function CryptoDashboard() {
                         </tr>
                       )}
                       {stats?.worst_trade && stats.worst_trade.id !== stats.best_trade?.id && (
-                        <tr className="hover:bg-white/[0.01] transition-all bg-red-500/[0.01]">
+                        <tr className={`hover:bg-white/[0.01] transition-all ${stats.worst_trade.pnl_pct > 0 ? 'bg-emerald-500/[0.02]' : stats.worst_trade.pnl_pct < 0 ? 'bg-red-500/[0.02]' : 'bg-white/[0.01]'}`}>
                           <td className="py-4">
                             <div className="flex items-center gap-1.5">
                               <span className="font-bold text-white">{stats.worst_trade.symbol}</span>
@@ -580,7 +586,9 @@ export default function CryptoDashboard() {
                           <td className="py-4 text-zinc-400">
                             {stats.worst_trade.opened_at ? Math.round((new Date(stats.worst_trade.closed_at).getTime() - new Date(stats.worst_trade.opened_at).getTime()) / 60000) : 'N/A'} mins
                           </td>
-                          <td className="py-4 font-mono font-bold text-red-400">{stats.worst_trade.pnl_pct}% (₹{stats.worst_trade.pnl_inr})</td>
+                          <td className={`py-4 font-mono font-bold ${stats.worst_trade.pnl_pct > 0 ? 'text-emerald-400' : stats.worst_trade.pnl_pct < 0 ? 'text-red-400' : 'text-zinc-400'}`}>
+                            {stats.worst_trade.pnl_pct > 0 ? '+' : ''}{stats.worst_trade.pnl_pct.toFixed(2)}% ({stats.worst_trade.pnl_inr > 0 ? '+₹' : stats.worst_trade.pnl_inr < 0 ? '-₹' : '₹'}{Math.abs(stats.worst_trade.pnl_inr).toFixed(2)})
+                          </td>
                           <td className="py-4 text-zinc-400 text-xs font-mono uppercase">{stats.worst_trade.close_reason || 'Stop Loss'}</td>
                           <td className="py-4 text-right">
                             <button 

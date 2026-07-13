@@ -38,6 +38,17 @@ async def startup_event():
             CryptoTrade, TradeMemory, CryptoBotSettings, CryptoPortfolioSnapshot
         )
         await conn.run_sync(Base.metadata.create_all)
+        from sqlalchemy import text
+        await conn.execute(text("ALTER TABLE crypto_portfolio ADD COLUMN IF NOT EXISTS take_profit_price_inr NUMERIC(20, 8);"))
+        # Update empty trade memories with a helpful fallback message since quota was breached
+        await conn.execute(text("""
+            UPDATE trade_memory 
+            SET what_worked = 'Unavailable due to API error.', 
+                what_failed = 'AI analysis failed: Gemini API key exceeded its daily request limits (429 Quota Exceeded) during the cycle.', 
+                lesson = 'Ensure your Gemini API key has sufficient quota limits or wait for the daily limit to reset.', 
+                avoid_pattern = 'N/A' 
+            WHERE lesson IS NULL OR lesson = '';
+        """))
     logger.info("Database initialized successfully")
 
     # Start Telegram Bot service

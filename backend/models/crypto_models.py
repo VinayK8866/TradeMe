@@ -71,6 +71,7 @@ class CryptoPortfolio(Base):
     avg_buy_price_inr = Column(Numeric(precision=20, scale=8), nullable=False)
     total_invested_inr = Column(Numeric(precision=16, scale=2), nullable=False)
     stop_loss_price_inr = Column(Numeric(precision=20, scale=8))                 # Hard stop per position
+    take_profit_price_inr = Column(Numeric(precision=20, scale=8))               # Take profit target price
     strategy_used = Column(String(50))
     opened_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

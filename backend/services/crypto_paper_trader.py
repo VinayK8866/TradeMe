@@ -177,6 +177,17 @@ async def open_paper_position(
     else:
         stop_loss_price = max_stop_loss_price
 
+    # Strategy-specific Take Profit target percentages
+    strategy_name = signal_data.get("selected_strategy", "")
+    tp_pct_map = {
+        "Momentum": 8.0,
+        "Mean Reversion": 4.0,
+        "Breakout": 12.0,
+        "MACD": 10.0
+    }
+    tp_pct = tp_pct_map.get(strategy_name, 6.0)
+    take_profit_price = current_price * (1 + tp_pct / 100)
+
     now = datetime.now(timezone.utc)
 
     async with async_session() as session:
@@ -189,7 +200,8 @@ async def open_paper_position(
             avg_buy_price_inr=Decimal(str(round(current_price, 4))),
             total_invested_inr=Decimal(str(round(position_inr, 2))),
             stop_loss_price_inr=Decimal(str(round(stop_loss_price, 4))),
-            strategy_used=signal_data.get("selected_strategy"),
+            take_profit_price_inr=Decimal(str(round(take_profit_price, 4))),
+            strategy_used=strategy_name,
             opened_at=now,
         )
         session.add(position)

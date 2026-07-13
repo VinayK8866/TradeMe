@@ -121,7 +121,7 @@ async def get_daily_timing_advisory() -> str:
         stats = await get_hourly_volatility_stats()
         
         # 3. Request Gemini advisory with stats injected
-        from services.gemini_brain import get_gemini_model
+        from services.gemini_brain import get_gemini_model, generate_content_with_fallback
         model = get_gemini_model()
         if not model:
             # Fallback markdown advisory if Gemini is not set up
@@ -157,7 +157,7 @@ async def get_daily_timing_advisory() -> str:
         3. **Risk Management Tip**: Warn about specific hours where bid-ask spreads might widen or fakeouts are common.
         """
 
-        response = await asyncio.to_thread(model.generate_content, prompt)
+        response = await generate_content_with_fallback(model, prompt)
         advisory_text = response.text if response else "Unable to generate daily timing advisory."
         
         # Cache successful response in Redis for 1 hour
